@@ -6,7 +6,7 @@
 #########################################################
 
 # TODO: HSV remove illumination problems
-# TODO: Have plane deform to obstacles, not highlight
+# TODO: Highlight anything that appears not near the front
 # TODO: Output the file name and the road surface normal (a, b, c)
 
 import os
@@ -240,7 +240,7 @@ def ransac_plane(points, max_iterations=30):
     return good_model
 
 
-# Optimize with math
+# Reduce re-computation
 # Create new array with flags specifying if element is within threshold
 # Element-wise multiplication such that only element within threshold is kept
 # Everything else is 0
@@ -294,8 +294,8 @@ def draw_trapezium(img, contours, midpoint_x, midpoint_y):
     by = midpoint_y + 50
 
     # Prepare to bump plane
-    bump_left = 0
-    bump_right = 0
+    bump_to_left = 0
+    bump_to_right = 0
     # Draw cluster bounding boxes first
     for contour in contours:
         if cv2.arcLength(contour, False) > 90:
@@ -314,13 +314,13 @@ def draw_trapezium(img, contours, midpoint_x, midpoint_y):
                 cv2.rectangle(imgL, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
             left_shift, right_shift = side_collision_detection(box, tl, tr, bl, br, ty)
-            if left_shift > bump_right:
-                bump_right = left_shift
-            if right_shift > bump_left:
-                bump_left = right_shift
+            if left_shift > bump_to_right:
+                bump_to_right = min(left_shift, 50)
+            if right_shift > bump_to_left:
+                bump_to_left = min(right_shift, 50)
 
-    vertices = np.array([[tl + bump_right, ty], [tr - bump_left, ty],
-                         [br - bump_left, by], [bl + bump_right, by]], np.int32)
+    vertices = np.array([[tl + bump_to_right, ty], [tr - bump_to_left, ty],
+                         [br - bump_to_left, by], [bl + bump_to_right, by]], np.int32)
     vertices = vertices.reshape((-1, 1, 2))
     img = cv2.polylines(img, [vertices], True, (0, 0, 255), 1)
 
@@ -342,12 +342,12 @@ def side_collision_detection(cluster_box, tl, tr, bl, br, top_y):
     left_shift = 0
     right_shift = 0
 
-    # Shift plane to left
+    # Shift plane to right
     if tr < cluster_box['left_x'] < br:
         box_bottom_intersection = trapezium_linear_x_right(cluster_box['bottom_y'])
-        left_shift = box_bottom_intersection - cluster_box['left_x']
+        left_shift = cluster_box['left_x'] - box_bottom_intersection
 
-    # Shift right
+    # Shift left
     if bl < cluster_box['right_x'] < tl:
         box_bottom_intersection = trapezium_linear_x_left(cluster_box['bottom_y'])
         right_shift = cluster_box['right_x'] - box_bottom_intersection
