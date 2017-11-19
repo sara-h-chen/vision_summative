@@ -5,6 +5,8 @@
 #
 #########################################################
 
+# TODO: HSV remove illumination problems
+
 import os
 import cv2
 import math
@@ -16,8 +18,54 @@ master_path_to_dataset = "TTBB-durham-02-10-17-sub10"
 directory_to_cycle_left = "left-images"
 directory_to_cycle_right = "right-images"
 
+#####################################################################
+
 orb = cv2.ORB_create()
 
+
+#########################################################
+#                   OBJECT DETECTION                    #
+#########################################################
+
+def detect_keypoints(image):
+    kp = orb.detect(image, None)
+    kp, des = orb.compute(image, kp)
+
+    img2 = cv2.drawKeypoints(image, kp, None, color=(0, 0, 255), flags=0)
+    return img2, kp
+
+
+def extract_keypoints(keypoints):
+    keypoints_array = [keypoints[i].pt for i in range(len(keypoints))]
+    keypoints_int = np.array(keypoints_array, np.float32)
+    return keypoints_int
+
+
+def cluster_keypoints(extracted_kp, imgL):
+    img = cv2.imread('image_assets/plain_black.png', 0)
+    crit = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 1, 10)
+    temp, classified_points, centers = cv2.kmeans(extracted_kp, K=10, bestLabels=None,
+                                                  criteria=crit, attempts=1,
+                                                  flags=cv2.KMEANS_RANDOM_CENTERS)
+    for point, allocation in zip(extracted_kp, classified_points):
+        color = (255, 255, 255)
+        cv2.circle(img, (int(point[0]), int(point[1])), 8, color, -1)
+
+    _, contours, _ = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    # for contour in contours:
+    #     if cv2.arcLength(contour, False) > 85:
+    #         x, y, w, h = cv2.boundingRect(contour)
+    #         cv2.rectangle(imgL, (x, y), (x+w, y+h), (0, 255, 0), 2)
+    # return imgL
+
+    # DEBUG
+    # for center in centers:
+    #     cv2.circle(img, (int(center[0]), int(center[1])), 10, (0, 255, 0), -1)
+    return contours
+
+
+#####################################################################
 
 #########################################################
 #                  PRE-PROCESS IMAGES                   #
@@ -40,18 +88,6 @@ def preprocess(imgL, imgR):
     ret, thresh_L = cv2.threshold(blur_L, 20, 75, cv2.THRESH_TOZERO)
 
     return thresh_L, thresh_R
-
-
-#########################################################
-#                  KEYPOINT DETECTION                   #
-#########################################################
-
-def detect_keypoints(image):
-    kp = orb.detect(image, None)
-    kp, des = orb.compute(image, kp)
-
-    img2 = cv2.drawKeypoints(image, kp, None, color=(0, 0, 255), flags=0)
-    return img2, kp
 
 
 #########################################################
@@ -79,8 +115,6 @@ def auto_canny(image, sigma=0.99):
 #             PROJECTION TO 3D POINTS                   #
 #########################################################
 
-#####################################################################
-
 # fixed camera parameters for this stereo setup (from calibration)
 
 camera_focal_length_px = 399.9745178222656  # focal length in pixels
@@ -90,7 +124,7 @@ stereo_camera_baseline_m = 0.2090607502     # camera baseline in metres
 image_centre_h = 262.0
 image_centre_w = 474.5
 
-#####################################################################
+#########################################################
 
 
 def project_disparity_to_3d(disparity, rgb=[]):
@@ -150,15 +184,18 @@ def get_disparity(left_image, right_image):
 #########################################################
 
 def fit_plane(points):
-    cross_product_check = np.array([0,0,0])
+    [p1, p2, p3] = [0, 0, 0]
+    cross_product_check = np.array([0, 0, 0])
     while cross_product_check[0] == 0 and cross_product_check[1] == 0 and cross_product_check[2] == 0:
-        [P1, P2, P3] = np.array([points[i] for i in sorted(random.sample(range(len(points)), 3))])
+        [p1, p2, p3] = np.array([points[i] for i in sorted(random.sample(range(len(points)), 3))])
         # make sure they are non-collinear
-        cross_product_check = np.cross(P1 - P2, P2 - P3)
+        cross_product_check = np.cross(p1 - p2, p2 - p3)
 
     # how to - calculate plane coefficients from these points
-    coefficients_abc = np.dot(np.linalg.inv(np.array([P1, P2, P3])), np.ones([3,1]))
-    coefficient_d = math.sqrt(coefficients_abc[0]*coefficients_abc[0]+coefficients_abc[1]*coefficients_abc[1]+coefficients_abc[2]*coefficients_abc[2])
+    coefficients_abc = np.dot(np.linalg.inv(np.array([p1, p2, p3])), np.ones([3, 1]))
+    coefficient_d = math.sqrt(coefficients_abc[0]*coefficients_abc[0] +
+                              coefficients_abc[1]*coefficients_abc[1] +
+                              coefficients_abc[2]*coefficients_abc[2])
     return coefficients_abc, coefficient_d
 
 
@@ -169,16 +206,16 @@ def get_distance_from_plane(points, coefficients_abc, coefficient_d):
     return dist
 
 
-def project_3D_points_to_2D_image_points(points):
+def project_3d_points_to_2d_image_points(points):
     points2 = []
 
     for i1 in range(len(points)):
         # Keep points within visible range on 2D image
-        if points[i1][0] > -0.12 and points[i1][1] > -0.12:
+        if points[i1][0] > -0.15 and points[i1][1] > -0.15:
             # reverse earlier projection for X and Y to get x and y again
             x = ((points[i1][0] * camera_focal_length_px) / points[i1][2]) + image_centre_w
             y = ((points[i1][1] * camera_focal_length_px) / points[i1][2]) + image_centre_h
-            points2.append([x,y])
+            points2.append([x, y])
 
     return np.array(points2)
 
@@ -211,9 +248,111 @@ def ransac_plane(points, max_iterations=30):
 # Create new array with flags specifying if element is within threshold
 # Element-wise multiplication such that only element within threshold is kept
 # Everything else is 0
-def find_inliers(points, distances, threshold):
-    inliers = np.select([distances <= threshold, distances > threshold], [1, 0])
+def find_inliers(points, distances, thrsh):
+    inliers = np.select([distances <= thrsh, distances > thrsh], [1, 0])
     return np.multiply(points, inliers)
+
+
+#########################################################
+#              DRAWING HELPER FUNCTIONS                 #
+#########################################################
+
+# Get the centre of the shape that we want to plot
+# O(n)
+# Plot the shape
+def draw_polygon(points, cnt, image):
+    min_x = float("inf")
+    max_x = 0
+    min_y = float("inf")
+    max_y = 0
+    for point in points:
+        if point[0] < min_x:
+            min_x = point[0]
+        elif point[0] > max_x:
+            max_x = point[0]
+
+        if point[1] < min_y:
+            min_y = point[1]
+        elif point[1] > max_y:
+            max_y = point[1]
+
+    mid_x = (min_x + max_x) // 2
+    mid_y = (min_y + max_y) // 2
+    image = draw_trapezium(image, cnt, mid_x, mid_y)
+    return image
+
+
+# Fix size of trapezium
+def draw_trapezium(img, contours, midpoint_x, midpoint_y):
+
+    # Top x-axes
+    tl = midpoint_x - 100
+    tr = midpoint_x + 100
+
+    # Bottom x-axes
+    bl = midpoint_x - 300
+    br = midpoint_x + 300
+
+    # y-axes
+    ty = midpoint_y - 75
+    by = midpoint_y + 50
+
+    # Prepare to bump plane
+    bump_left = 0
+    bump_right = 0
+    # Draw cluster bounding boxes first
+    for contour in contours:
+        if cv2.arcLength(contour, False) > 85:
+            x, y, w, h = cv2.boundingRect(contour)
+            box = {
+                'left_x': x,
+                'top_y': y,
+                'right_x': x + w,
+                'bottom_y': y + h
+            }
+
+            if top_collision_detected(box, tl, tr, ty):
+                cv2.rectangle(imgL, (x, y), (x+w, y+h), (0, 0, 255), 2)
+            # DEBUG
+            else:
+                cv2.rectangle(imgL, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                # TODO: Fix this bug
+                # left_adjustment, right_adjustment = side_collision_detection(box, tl, tr, bl, br, ty)
+                # if left_adjustment > bump_left:
+                #     tl -= bump_left
+                #     left_adjustment = 0
+
+    vertices = np.array([[tl, ty], [tr, ty], [br, by], [bl, by]], np.int32)
+    vertices = vertices.reshape((-1, 1, 2))
+    img = cv2.polylines(img, [vertices], True, (0, 255, 255), 3)
+
+    return img
+
+
+def top_collision_detected(cluster_box, left, right, top_y):
+    if cluster_box['right_x'] <= left or cluster_box['left_x'] >= right:
+        return False
+    if cluster_box['bottom_y'] < top_y:
+        return False
+    return True
+
+
+def side_collision_detection(cluster_box, tl, tr, bl, br, top_y):
+    if cluster_box['bottom_y'] < top_y:
+        return 0, 0
+
+    left_shift = 0
+    right_shift = 0
+
+    # Shift plane to left
+    if tr < cluster_box['left_x'] < br:
+        left_shift = cluster_box['left_x'] - tr
+
+    # Shift right
+    if bl < cluster_box['right_x'] < tl:
+        right_shift = tl - cluster_box['right_x']
+
+    return left_shift, right_shift
 
 
 #########################################################
@@ -272,20 +411,22 @@ if __name__ == '__main__':
             threshold = 0.1
             best_plane = ransac_plane(depth_points)
             points_below_threshold = find_inliers(depth_points, best_plane, threshold)
-            points_to_draw = project_3D_points_to_2D_image_points(points_below_threshold)
+            points_to_draw = project_3d_points_to_2d_image_points(points_below_threshold)
+
+            # Find objects in scene
+            kp = orb.detect(imgL, None)
+            kp, des = orb.compute(imgL, kp)
+            clusters = extract_keypoints(kp)
+            cluster_mask = cluster_keypoints(clusters, imgL)
+            # DEBUG
+            # cv2.imshow("clustered", cluster_mask)
+
             # Convert from floating point array to numpy int array
             # so that can draw on pixels
             points_to_draw = np.array(points_to_draw, np.int32)
+            drawn = draw_polygon(points_to_draw, cluster_mask, imgL)
+            cv2.imshow("drawn", drawn)
 
-
-
-
-
-
-            # DEBUG
-            # hull = cv2.convexHull(points_to_draw)
-            # cv2.polylines(imgL, hull, True, (0,255,0), 3)
-            # cv2.imshow("drawn plane", imgL)
             cv2.waitKey(0)
         else:
             print("-- files skipped (perhaps one is missing or not PNG)\n")
