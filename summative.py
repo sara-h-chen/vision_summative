@@ -6,6 +6,8 @@
 #########################################################
 
 # TODO: HSV remove illumination problems
+# TODO: Have plane deform to obstacles, not highlight
+# TODO: Output the file name and the road surface normal (a, b, c)
 
 import os
 import cv2
@@ -52,12 +54,6 @@ def cluster_keypoints(extracted_kp, imgL):
         cv2.circle(img, (int(point[0]), int(point[1])), 8, color, -1)
 
     _, contours, _ = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    # for contour in contours:
-    #     if cv2.arcLength(contour, False) > 85:
-    #         x, y, w, h = cv2.boundingRect(contour)
-    #         cv2.rectangle(imgL, (x, y), (x+w, y+h), (0, 255, 0), 2)
-    # return imgL
 
     # DEBUG
     # for center in centers:
@@ -302,7 +298,7 @@ def draw_trapezium(img, contours, midpoint_x, midpoint_y):
     bump_right = 0
     # Draw cluster bounding boxes first
     for contour in contours:
-        if cv2.arcLength(contour, False) > 85:
+        if cv2.arcLength(contour, False) > 90:
             x, y, w, h = cv2.boundingRect(contour)
             box = {
                 'left_x': x,
@@ -316,15 +312,17 @@ def draw_trapezium(img, contours, midpoint_x, midpoint_y):
             # DEBUG
             else:
                 cv2.rectangle(imgL, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                # TODO: Fix this bug
-                # left_adjustment, right_adjustment = side_collision_detection(box, tl, tr, bl, br, ty)
-                # if left_adjustment > bump_left:
-                #     tl -= bump_left
-                #     left_adjustment = 0
 
-    vertices = np.array([[tl, ty], [tr, ty], [br, by], [bl, by]], np.int32)
+            left_shift, right_shift = side_collision_detection(box, tl, tr, bl, br, ty)
+            if left_shift > bump_right:
+                bump_right = left_shift
+            if right_shift > bump_left:
+                bump_left = right_shift
+
+    vertices = np.array([[tl + bump_right, ty], [tr - bump_left, ty],
+                         [br - bump_left, by], [bl + bump_right, by]], np.int32)
     vertices = vertices.reshape((-1, 1, 2))
-    img = cv2.polylines(img, [vertices], True, (0, 255, 255), 3)
+    img = cv2.polylines(img, [vertices], True, (0, 0, 255), 1)
 
     return img
 
@@ -346,13 +344,32 @@ def side_collision_detection(cluster_box, tl, tr, bl, br, top_y):
 
     # Shift plane to left
     if tr < cluster_box['left_x'] < br:
-        left_shift = cluster_box['left_x'] - tr
+        box_bottom_intersection = trapezium_linear_x_right(cluster_box['bottom_y'])
+        left_shift = box_bottom_intersection - cluster_box['left_x']
 
     # Shift right
     if bl < cluster_box['right_x'] < tl:
-        right_shift = tl - cluster_box['right_x']
+        box_bottom_intersection = trapezium_linear_x_left(cluster_box['bottom_y'])
+        right_shift = cluster_box['right_x'] - box_bottom_intersection
 
     return left_shift, right_shift
+
+
+# Find x-intersection of bottom of box with trapezium
+#        /
+#       |
+#      /|
+#     / |    E.g. left of trapezium
+#  --x--|
+#   /
+#  /
+def trapezium_linear_x_left(y_intersection):
+    return int((424.25 - y_intersection) * 8/5)
+
+
+# Find x-intersection of box on right
+def trapezium_linear_x_right(y_intersection):
+    return int((y_intersection + 133.25) * 8/5)
 
 
 #########################################################
