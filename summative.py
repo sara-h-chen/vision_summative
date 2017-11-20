@@ -8,6 +8,14 @@
 # TODO: HSV remove illumination problems
 # TODO: Highlight anything that appears not near the front
 # TODO: Output the file name and the road surface normal (a, b, c)
+# TODO: Find out how to calculate normal
+# TODO: What if there is no disparity information available?
+# TODO: Make sure that plane can be plotted; if it is vertical, throw away
+# TODO: Pre-process disparity image so that it is as noise-free as possible
+# TODO: To wrap-up, allow the script to cycle through the images without keypress
+# TODO: Report and display road boundaries with pixel wise boundary
+# TODO: Draw glyph with normal
+# TODO: Write up report
 
 import os
 import cv2
@@ -43,7 +51,7 @@ def extract_keypoints(keypoints):
     return keypoints_int
 
 
-def cluster_keypoints(extracted_kp, imgL):
+def cluster_keypoints(extracted_kp):
     img = cv2.imread('image_assets/plain_black.png', 0)
     crit = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 1, 10)
     temp, classified_points, centers = cv2.kmeans(extracted_kp, K=10, bestLabels=None,
@@ -310,10 +318,12 @@ def draw_trapezium(img, contours, midpoint_x, midpoint_y):
             if top_collision_detected(box, tl, tr, ty):
                 cv2.rectangle(imgL, (x, y), (x+w, y+h), (0, 0, 255), 2)
             # DEBUG
-            else:
-                cv2.rectangle(imgL, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            # else:
+                # cv2.rectangle(imgL, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
             left_shift, right_shift = side_collision_detection(box, tl, tr, bl, br, ty)
+            # TODO: If way above threshold and the two points cross then no road is present
+            # TODO: Implement the above
             if left_shift > bump_to_right:
                 bump_to_right = min(left_shift, 50)
             if right_shift > bump_to_left:
@@ -434,7 +444,7 @@ if __name__ == '__main__':
             kp = orb.detect(imgL, None)
             kp, des = orb.compute(imgL, kp)
             clusters = extract_keypoints(kp)
-            cluster_mask = cluster_keypoints(clusters, imgL)
+            cluster_mask = cluster_keypoints(clusters)
             # DEBUG
             # cv2.imshow("clustered", cluster_mask)
 
