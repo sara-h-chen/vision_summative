@@ -5,17 +5,14 @@
 #
 #########################################################
 
-# TODO: HSV remove illumination problems
 # TODO: Highlight anything that appears not near the front
 # TODO: Output the file name and the road surface normal (a, b, c)
 # TODO: Find out how to calculate normal
-# TODO: What if there is no disparity information available?
 # TODO: Make sure that plane can be plotted; if it is vertical, throw away
-# TODO: Pre-process disparity image so that it is as noise-free as possible
 # TODO: To wrap-up, allow the script to cycle through the images without keypress
-# TODO: Report and display road boundaries with pixel wise boundary
 # TODO: Draw glyph with normal
 # TODO: Write up report
+# TODO: Clean up code
 
 import os
 import cv2
@@ -31,6 +28,52 @@ directory_to_cycle_right = "right-images"
 #####################################################################
 
 orb = cv2.ORB_create()
+
+
+#########################################################
+#             ILLUMINATION PRE-PROCESSING               #
+#########################################################
+# https://stackoverflow.com/questions/18452438/how-can- #
+# i-remove-drastic-brightness-variations-in-a-video     #
+#########################################################
+
+def remove_illumination(image):
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2YUV)
+    y, u, v = cv2.split(image)
+    y = cv2.equalizeHist(y)
+    # Remove low frequency details of the image
+    blur_y = cv2.GaussianBlur(y, (23,23), 0)
+    y = y - blur_y
+    image = cv2.merge((y, u, v))
+    return cv2.cvtColor(image, cv2.COLOR_YUV2BGR)
+
+
+#########################################################
+#                 HISTOGRAM MATCHING                    #
+#########################################################
+# http://vzaguskin.github.io/histmatching1/             #
+#########################################################
+
+def match(imsrc, imdest, nbr_bins=255):
+    if len(imsrc.shape) < 3:
+        imsrc = imsrc[:, :, np.newaxis]
+        imdest = imdest[:, :, np.newaxis]
+
+    imres = imsrc.copy()
+    for d in range(imsrc.shape[2]):
+        imhist, bins = np.histogram(imsrc[:, :, d].flatten(), nbr_bins, normed=True)
+        tinthist, bins = np.histogram(imdest[:, :, d].flatten(), nbr_bins, normed=True)
+
+        cdfsrc = imhist.cumsum()  # cumulative distribution function
+        cdfsrc = (255 * cdfsrc / cdfsrc[-1]).astype(np.uint8)  # normalize
+
+        cdftint = tinthist.cumsum()  # cumulative distribution function
+        cdftint = (255 * cdftint / cdftint[-1]).astype(np.uint8)  # normalize
+
+        im2 = np.interp(imsrc[:, :, d].flatten(), bins[:-1], cdfsrc)
+        im3 = np.interp(im2, cdftint, bins[:-1])
+        imres[:, :, d] = im3.reshape((imsrc.shape[0], imsrc.shape[1]))
+    return imres
 
 
 #########################################################
@@ -63,10 +106,13 @@ def cluster_keypoints(extracted_kp):
 
     _, contours, _ = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    # DEBUG
-    # for center in centers:
-    #     cv2.circle(img, (int(center[0]), int(center[1])), 10, (0, 255, 0), -1)
-    return contours
+    for contour in contours:
+        if cv2.arcLength(contour, False) > 90:
+            x, y, w, h = cv2.boundingRect(contour)
+            box = np.array([[[x, y], [x + w, y], [x + w, y + h], [x, y + h]]], dtype=np.int32)
+            cv2.fillPoly(img, box, (255, 255, 255))
+
+    return img
 
 
 #####################################################################
@@ -81,38 +127,22 @@ def cluster_keypoints(extracted_kp):
 #########################################################
 
 def preprocess(imgL, imgR):
+    illum_removed_l = remove_illumination(imgL)
+    illum_removed_r = remove_illumination(imgR)
     # N.B. need to do for both as both are 3-channel images
-    grayL = cv2.cvtColor(imgL, cv2.COLOR_BGR2GRAY)
-    grayR = cv2.cvtColor(imgR, cv2.COLOR_BGR2GRAY)
+    grayL = cv2.cvtColor(illum_removed_l, cv2.COLOR_BGR2GRAY)
+    grayR = cv2.cvtColor(illum_removed_r, cv2.COLOR_BGR2GRAY)
 
-    # Blur to improve results and reduce computation
-    blur_R = cv2.blur(grayR, (5, 5))
-    blur_L = cv2.blur(grayL, (5, 5))
-    ret, thresh_R = cv2.threshold(blur_R, 20, 75, cv2.THRESH_TOZERO)
-    ret, thresh_L = cv2.threshold(blur_L, 20, 75, cv2.THRESH_TOZERO)
+    ret, thresh_R = cv2.threshold(grayR, 20, 100, cv2.THRESH_TOZERO)
+    ret, thresh_L = cv2.threshold(grayL, 20, 100, cv2.THRESH_TOZERO)
+    # cv2.imshow("threshed_r", thresh_R)
+    # cv2.imshow("threshed_l", thresh_L)
 
-    return thresh_L, thresh_R
+    grayR_matched = match(thresh_R, thresh_L)
+    grayL_matched = match(thresh_L, thresh_R)
+    cv2.imshow("matched_r", grayR_matched)
 
-
-#########################################################
-#                AUTO CANNY FUNCTION                    #
-#########################################################
-# https://www.pyimagesearch.com/2015/04/06/             #
-# zero-parameter-automatic-canny-edge-detection-with    #
-# -python-and-opencv/                                   #
-#########################################################
-
-def auto_canny(image, sigma=0.99):
-    # compute the median of the single channel pixel intensities
-    v = np.median(image)
-
-    # apply automatic Canny edge detection using the computed median
-    lower = int(max(0, (1.0 - sigma) * v))
-    upper = int(min(255, (1.0 + sigma) * v))
-    edged = cv2.Canny(image, lower, upper)
-
-    # return the edged image
-    return edged
+    return grayL_matched, grayR_matched
 
 
 #########################################################
@@ -147,7 +177,6 @@ def project_disparity_to_3d(disparity, rgb=[]):
                 # calculate corresponding 3D point [X, Y, Z]
                 # stereo lecture - slide 22 + 25
                 Z = (f * B) / disparity[y, x]
-
                 X = ((x - image_centre_w) * Z) / f
                 Y = ((y - image_centre_h) * Z) / f
 
@@ -175,11 +204,6 @@ def get_disparity(left_image, right_image):
     # as disparity=-1 means no disparity available
     _, disparity = cv2.threshold(disparity, 0, max_disparity * 16, cv2.THRESH_TOZERO)
     scaled = (disparity / 16.).astype(np.uint8)
-    # crop disparity to chop out left part where there are with no disparity
-    # as this area is not seen by both cameras and also
-    # chop out the bottom area (where we see the front of car bonnet)
-    width = np.size(scaled, 1)
-    scaled = scaled[0:390, 135:width]
     return scaled
 
 
@@ -214,9 +238,8 @@ def project_3d_points_to_2d_image_points(points):
     points2 = []
 
     for i1 in range(len(points)):
-        # Keep points within visible range on 2D image
-        if points[i1][0] > -0.15 and points[i1][1] > -0.15:
-            # reverse earlier projection for X and Y to get x and y again
+        # reverse earlier projection for X and Y to get x and y again
+        if points[i1][2]:
             x = ((points[i1][0] * camera_focal_length_px) / points[i1][2]) + image_centre_w
             y = ((points[i1][1] * camera_focal_length_px) / points[i1][2]) + image_centre_h
             points2.append([x, y])
@@ -229,157 +252,26 @@ def project_3d_points_to_2d_image_points(points):
 #########################################################
 
 # Returns distances of all points from plane
-def ransac_plane(points, max_iterations=30):
-    good_model = None
-    best_min_distance = 100
+def ransac_plane(points, inlier_thresh, max_iterations=50):
     iterations = 0
+    best_abc, best_d = 0, 1
+    inlier_points = []
     while iterations < max_iterations:
+        temp_inliers = []
         plane_abc, plane_d = fit_plane(points)
         distances = get_distance_from_plane(points, plane_abc, plane_d)
-        total_distances = np.sum(distances)
+        for i in range(len(distances)):
+            if distances[i] < inlier_thresh:
+                temp_inliers.append(points[i])
 
-        # Run many iterations and find smallest distance
-        if total_distances < best_min_distance:
-            best_min_distance = total_distances
-            good_model = distances
+        # Run many iterations and find plane with the most points that agree
+        if len(temp_inliers) > len(inlier_points):
+            inlier_points = temp_inliers
 
         iterations += 1
-
-    return good_model
-
-
-# Reduce re-computation
-# Create new array with flags specifying if element is within threshold
-# Element-wise multiplication such that only element within threshold is kept
-# Everything else is 0
-def find_inliers(points, distances, thrsh):
-    inliers = np.select([distances <= thrsh, distances > thrsh], [1, 0])
-    return np.multiply(points, inliers)
-
-
-#########################################################
-#              DRAWING HELPER FUNCTIONS                 #
-#########################################################
-
-# Get the centre of the shape that we want to plot
-# O(n)
-# Plot the shape
-def draw_polygon(points, cnt, image):
-    min_x = float("inf")
-    max_x = 0
-    min_y = float("inf")
-    max_y = 0
-    for point in points:
-        if point[0] < min_x:
-            min_x = point[0]
-        elif point[0] > max_x:
-            max_x = point[0]
-
-        if point[1] < min_y:
-            min_y = point[1]
-        elif point[1] > max_y:
-            max_y = point[1]
-
-    mid_x = (min_x + max_x) // 2
-    mid_y = (min_y + max_y) // 2
-    image = draw_trapezium(image, cnt, mid_x, mid_y)
-    return image
-
-
-# Fix size of trapezium
-def draw_trapezium(img, contours, midpoint_x, midpoint_y):
-
-    # Top x-axes
-    tl = midpoint_x - 100
-    tr = midpoint_x + 100
-
-    # Bottom x-axes
-    bl = midpoint_x - 300
-    br = midpoint_x + 300
-
-    # y-axes
-    ty = midpoint_y - 75
-    by = midpoint_y + 50
-
-    # Prepare to bump plane
-    bump_to_left = 0
-    bump_to_right = 0
-    # Draw cluster bounding boxes first
-    for contour in contours:
-        if cv2.arcLength(contour, False) > 90:
-            x, y, w, h = cv2.boundingRect(contour)
-            box = {
-                'left_x': x,
-                'top_y': y,
-                'right_x': x + w,
-                'bottom_y': y + h
-            }
-
-            if top_collision_detected(box, tl, tr, ty):
-                cv2.rectangle(imgL, (x, y), (x+w, y+h), (0, 0, 255), 2)
-            # DEBUG
-            # else:
-                # cv2.rectangle(imgL, (x, y), (x + w, y + h), (0, 255, 0), 2)
-
-            left_shift, right_shift = side_collision_detection(box, tl, tr, bl, br, ty)
-            # TODO: If way above threshold and the two points cross then no road is present
-            # TODO: Implement the above
-            if left_shift > bump_to_right:
-                bump_to_right = min(left_shift, 50)
-            if right_shift > bump_to_left:
-                bump_to_left = min(right_shift, 50)
-
-    vertices = np.array([[tl + bump_to_right, ty], [tr - bump_to_left, ty],
-                         [br - bump_to_left, by], [bl + bump_to_right, by]], np.int32)
-    vertices = vertices.reshape((-1, 1, 2))
-    img = cv2.polylines(img, [vertices], True, (0, 0, 255), 1)
-
-    return img
-
-
-def top_collision_detected(cluster_box, left, right, top_y):
-    if cluster_box['right_x'] <= left or cluster_box['left_x'] >= right:
-        return False
-    if cluster_box['bottom_y'] < top_y:
-        return False
-    return True
-
-
-def side_collision_detection(cluster_box, tl, tr, bl, br, top_y):
-    if cluster_box['bottom_y'] < top_y:
-        return 0, 0
-
-    left_shift = 0
-    right_shift = 0
-
-    # Shift plane to right
-    if tr < cluster_box['left_x'] < br:
-        box_bottom_intersection = trapezium_linear_x_right(cluster_box['bottom_y'])
-        left_shift = cluster_box['left_x'] - box_bottom_intersection
-
-    # Shift left
-    if bl < cluster_box['right_x'] < tl:
-        box_bottom_intersection = trapezium_linear_x_left(cluster_box['bottom_y'])
-        right_shift = cluster_box['right_x'] - box_bottom_intersection
-
-    return left_shift, right_shift
-
-
-# Find x-intersection of bottom of box with trapezium
-#        /
-#       |
-#      /|
-#     / |    E.g. left of trapezium
-#  --x--|
-#   /
-#  /
-def trapezium_linear_x_left(y_intersection):
-    return int((424.25 - y_intersection) * 8/5)
-
-
-# Find x-intersection of box on right
-def trapezium_linear_x_right(y_intersection):
-    return int((y_intersection + 133.25) * 8/5)
+    # TODO: Fix this
+    print("Normal: ", np.divide(best_abc, best_d))
+    return inlier_points
 
 
 #########################################################
@@ -387,9 +279,8 @@ def trapezium_linear_x_right(y_intersection):
 #########################################################
 
 if __name__ == '__main__':
-    mask = cv2.imread('image_assets/_general_mask.png', 0)
-    left_mask = cv2.imread('image_assets/left_mask.png', 0)
-    right_mask = cv2.imread('image_assets/right_mask.png', 0)
+    mask = cv2.imread('image_assets/lm_dilated.png', 0)
+    plain = cv2.imread('image_assets/plain_black.png', 0)
 
     full_path_directory_left = os.path.join(master_path_to_dataset, directory_to_cycle_left)
     full_path_directory_right = os.path.join(master_path_to_dataset, directory_to_cycle_right)
@@ -400,6 +291,7 @@ if __name__ == '__main__':
     # parameters can be adjusted, current ones from [Hamilton / Breckon et al. 2013]
     max_disparity = 128
     stereoProcessor = cv2.StereoSGBM_create(0, max_disparity, 21)
+    kernel = np.ones((5, 5), np.uint8)
 
     for filename_left in left_file_list:
         # from the left image filename get the corresponding right image
@@ -412,6 +304,28 @@ if __name__ == '__main__':
             imgL = cv2.imread(full_path_filename_left, cv2.IMREAD_COLOR)
             imgR = cv2.imread(full_path_filename_right, cv2.IMREAD_COLOR)
 
+            # Remove green regions
+            hsv_l =cv2.cvtColor(imgL, cv2.COLOR_BGR2HSV)
+            sensitivity = 40
+            lower_green = np.array([60 - sensitivity, 50, 50])
+            upper_green = np.array([60 + sensitivity, 255, 255])
+            green_region = cv2.inRange(hsv_l, lower_green, upper_green)
+            ret, thresh_green = cv2.threshold(green_region, 1, 255, cv2.THRESH_BINARY)
+            inv_green = cv2.bitwise_not(thresh_green)
+            inv_green = cv2.dilate(inv_green, kernel, iterations=3)
+            # DEBUG
+            # cv2.imshow("green regions", inv_green)
+
+            # Remove red regions
+            lower_red = np.array([0, 50, 50])
+            upper_red = np.array([10, 255, 255])
+            red_region = cv2.inRange(hsv_l, lower_red, upper_red)
+            ret, thresh_red = cv2.threshold(red_region, 1, 255, cv2.THRESH_BINARY)
+            inv_red = cv2.bitwise_not(thresh_red)
+            inv_red = cv2.dilate(inv_red, kernel, iterations=3)
+            ## DEBUG
+            # cv2.imshow("red regions", inv_red)
+
             preprocessed_L, preprocessed_R = preprocess(imgL, imgR)
             # DEBUG
             # cv2.imshow("preprocessed_L", preprocessed_L)
@@ -419,8 +333,12 @@ if __name__ == '__main__':
 
             # Apply mask to only look at region in front of car hood;
             # reduces computation
-            preprocessed_L = cv2.bitwise_and(preprocessed_L, left_mask)
-            preprocessed_R = cv2.bitwise_and(preprocessed_R, right_mask)
+            preprocessed_L = cv2.bitwise_and(preprocessed_L, mask)
+            # Remove green and red elements
+            # preprocessed_L = cv2.bitwise_and(preprocessed_L, inv_green)
+            # preprocessed_L = cv2.bitwise_and(preprocessed_L, inv_red)
+            cv2.imshow("red_removed", preprocessed_L)
+            preprocessed_R = cv2.bitwise_and(preprocessed_R, mask)
             # DEBUG
             # cv2.imshow("masked_L", preprocessed_L)
             # cv2.imshow("masked_R", preprocessed_R)
@@ -430,29 +348,53 @@ if __name__ == '__main__':
             # display image (scaling it to the full 0->255 range based on the number
             # of disparities in use for the stereo part)
             dsp = (disparity_scaled * (256. / max_disparity)).astype(np.uint8)
-            # Apply Canny to the disparity image to reduce points in point cloud
-            canny_dsp = auto_canny(dsp)
-            depth_points = project_disparity_to_3d(canny_dsp)
+            depth_points = project_disparity_to_3d(dsp)
+            # DEBUG
+            cv2.imshow("depth", dsp)
 
             # Run RANSAC, keep only inliers
-            threshold = 0.1
-            best_plane = ransac_plane(depth_points)
-            points_below_threshold = find_inliers(depth_points, best_plane, threshold)
-            points_to_draw = project_3d_points_to_2d_image_points(points_below_threshold)
+            threshold = 0.05
+            best_plane = ransac_plane(depth_points, threshold)
+            points_to_draw = project_3d_points_to_2d_image_points(best_plane)
 
+            dsp_x, dsp_y = dsp.shape[1], dsp.shape[0]
+            img_x, img_y = imgL.shape[1], imgL.shape[0]
+            for point in points_to_draw:
+                cv2.circle(plain, (int(point[0]) + (img_x - dsp_x), int(point[1])), 1, (255,255,255), 1)
+            # Draw circles that make up plain
+            # DEBUG
+            # cv2.imshow("drawn circles", plain)
+
+            # TODO: Put this in function
             # Find objects in scene
-            kp = orb.detect(imgL, None)
-            kp, des = orb.compute(imgL, kp)
+            img, kp = detect_keypoints(imgL)
+            # DEBUG
+            # cv2.imshow("keypoints", img)
             clusters = extract_keypoints(kp)
             cluster_mask = cluster_keypoints(clusters)
             # DEBUG
             # cv2.imshow("clustered", cluster_mask)
+            remove_clusters = plain - cluster_mask
+            remove_clusters = cv2.bitwise_and(remove_clusters, mask)
+            remove_clusters = cv2.bitwise_and(remove_clusters, inv_red)
+            remove_clusters = cv2.bitwise_and(remove_clusters, inv_green)
+            cv2.imshow("remove_clusters", remove_clusters)
+            ret, thresh1 = cv2.threshold(remove_clusters, 1, 255, cv2.THRESH_BINARY)
+            # DEBUG
+            # cv2.imshow("removed clusters", remove_clusters)
+            # cv2.imshow("threshed", thresh1)
 
-            # Convert from floating point array to numpy int array
-            # so that can draw on pixels
-            points_to_draw = np.array(points_to_draw, np.int32)
-            drawn = draw_polygon(points_to_draw, cluster_mask, imgL)
-            cv2.imshow("drawn", drawn)
+            # TODO: Put this in a function
+            img_erosion = cv2.erode(thresh1, kernel, iterations=5)
+            img_dilation = cv2.dilate(img_erosion, kernel, iterations=2)
+
+            _, contours, _ = cv2.findContours(img_dilation, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            max_contour = max(contours, key=cv2.contourArea)
+            epsilon = 0.05 * cv2.arcLength(max_contour, True)
+            # approx = cv2.approxPolyDP(max_contour, epsilon, True)
+            cv2.drawContours(imgL, [max_contour], 0, (0,0,255), 2)
+            # cv2.drawContours(imgL, approx, 0, (0, 0, 255), 2)
+            cv2.imshow("contoured", imgL)
 
             cv2.waitKey(0)
         else:
