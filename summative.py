@@ -5,14 +5,13 @@
 #
 #########################################################
 
-# TODO: Highlight anything that appears not near the front
+# TODO: Highlight anything that appears near the front
 # TODO: Output the file name and the road surface normal (a, b, c)
 # TODO: Find out how to calculate normal
 # TODO: Make sure that plane can be plotted; if it is vertical, throw away
 # TODO: To wrap-up, allow the script to cycle through the images without keypress
 # TODO: Draw glyph with normal
 # TODO: Write up report
-# TODO: Clean up code
 
 import os
 import cv2
@@ -94,6 +93,7 @@ def extract_keypoints(keypoints):
     return keypoints_int
 
 
+# Create a mask that blacks out all the detected objects
 def cluster_keypoints(extracted_kp):
     img = cv2.imread('image_assets/plain_black.png', 0)
     crit = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 1, 10)
@@ -114,6 +114,60 @@ def cluster_keypoints(extracted_kp):
 
     return img
 
+
+def remove_objects(plain, imgL):
+    # Find objects in scene
+    img, kp = detect_keypoints(imgL)
+    # DEBUG
+    # cv2.imshow("keypoints", img)
+    clusters = extract_keypoints(kp)
+    cluster_mask = cluster_keypoints(clusters)
+    # DEBUG
+    # cv2.imshow("clustered", cluster_mask)
+    remove_clusters = plain - cluster_mask
+    remove_clusters = cv2.bitwise_and(remove_clusters, mask)
+    remove_clusters = cv2.bitwise_and(remove_clusters, red_mask)
+    remove_clusters = cv2.bitwise_and(remove_clusters, green_mask)
+    # DEBUG
+    # cv2.imshow("remove_clusters", remove_clusters)
+    ret, thresh1 = cv2.threshold(remove_clusters, 1, 255, cv2.THRESH_BINARY)
+    # DEBUG
+    # cv2.imshow("removed clusters", remove_clusters)
+    # cv2.imshow("threshed", thresh1)
+
+    img_erosion = cv2.erode(thresh1, kernel, iterations=5)
+    img_dilation = cv2.dilate(img_erosion, kernel, iterations=2)
+    return img_dilation
+
+
+#########################################################
+#                COLOR SPACE PROCESSING                 #
+#########################################################
+
+# Remove red and green color regions
+# Creates clearer object boundaries
+def remove_colors(imgL):
+    hsv_l =cv2.cvtColor(imgL, cv2.COLOR_BGR2HSV)
+    sensitivity = 40
+    lower_green = np.array([60 - sensitivity, 50, 50])
+    upper_green = np.array([60 + sensitivity, 255, 255])
+    green_region = cv2.inRange(hsv_l, lower_green, upper_green)
+    ret, thresh_green = cv2.threshold(green_region, 1, 255, cv2.THRESH_BINARY)
+    inv_green = cv2.bitwise_not(thresh_green)
+    inv_green = cv2.dilate(inv_green, kernel, iterations=3)
+    # DEBUG
+    # cv2.imshow("green regions", inv_green)
+
+    # Remove red regions
+    lower_red = np.array([0, 50, 50])
+    upper_red = np.array([10, 255, 255])
+    red_region = cv2.inRange(hsv_l, lower_red, upper_red)
+    ret, thresh_red = cv2.threshold(red_region, 1, 255, cv2.THRESH_BINARY)
+    inv_red = cv2.bitwise_not(thresh_red)
+    inv_red = cv2.dilate(inv_red, kernel, iterations=3)
+    ## DEBUG
+    # cv2.imshow("red regions", inv_red)
+    return inv_green, inv_red
 
 #####################################################################
 
@@ -304,28 +358,9 @@ if __name__ == '__main__':
             imgL = cv2.imread(full_path_filename_left, cv2.IMREAD_COLOR)
             imgR = cv2.imread(full_path_filename_right, cv2.IMREAD_COLOR)
 
-            # Remove green regions
-            hsv_l =cv2.cvtColor(imgL, cv2.COLOR_BGR2HSV)
-            sensitivity = 40
-            lower_green = np.array([60 - sensitivity, 50, 50])
-            upper_green = np.array([60 + sensitivity, 255, 255])
-            green_region = cv2.inRange(hsv_l, lower_green, upper_green)
-            ret, thresh_green = cv2.threshold(green_region, 1, 255, cv2.THRESH_BINARY)
-            inv_green = cv2.bitwise_not(thresh_green)
-            inv_green = cv2.dilate(inv_green, kernel, iterations=3)
-            # DEBUG
-            # cv2.imshow("green regions", inv_green)
+            red_mask, green_mask = remove_colors(imgL)
 
-            # Remove red regions
-            lower_red = np.array([0, 50, 50])
-            upper_red = np.array([10, 255, 255])
-            red_region = cv2.inRange(hsv_l, lower_red, upper_red)
-            ret, thresh_red = cv2.threshold(red_region, 1, 255, cv2.THRESH_BINARY)
-            inv_red = cv2.bitwise_not(thresh_red)
-            inv_red = cv2.dilate(inv_red, kernel, iterations=3)
-            ## DEBUG
-            # cv2.imshow("red regions", inv_red)
-
+            # Histogram equalization
             preprocessed_L, preprocessed_R = preprocess(imgL, imgR)
             # DEBUG
             # cv2.imshow("preprocessed_L", preprocessed_L)
@@ -334,10 +369,6 @@ if __name__ == '__main__':
             # Apply mask to only look at region in front of car hood;
             # reduces computation
             preprocessed_L = cv2.bitwise_and(preprocessed_L, mask)
-            # Remove green and red elements
-            # preprocessed_L = cv2.bitwise_and(preprocessed_L, inv_green)
-            # preprocessed_L = cv2.bitwise_and(preprocessed_L, inv_red)
-            cv2.imshow("red_removed", preprocessed_L)
             preprocessed_R = cv2.bitwise_and(preprocessed_R, mask)
             # DEBUG
             # cv2.imshow("masked_L", preprocessed_L)
@@ -350,50 +381,30 @@ if __name__ == '__main__':
             dsp = (disparity_scaled * (256. / max_disparity)).astype(np.uint8)
             depth_points = project_disparity_to_3d(dsp)
             # DEBUG
-            cv2.imshow("depth", dsp)
+            # cv2.imshow("depth", dsp)
 
             # Run RANSAC, keep only inliers
             threshold = 0.05
             best_plane = ransac_plane(depth_points, threshold)
             points_to_draw = project_3d_points_to_2d_image_points(best_plane)
 
+            # Numbers used to generate the mask offset
             dsp_x, dsp_y = dsp.shape[1], dsp.shape[0]
             img_x, img_y = imgL.shape[1], imgL.shape[0]
             for point in points_to_draw:
                 cv2.circle(plain, (int(point[0]) + (img_x - dsp_x), int(point[1])), 1, (255,255,255), 1)
-            # Draw circles that make up plain
             # DEBUG
             # cv2.imshow("drawn circles", plain)
 
-            # TODO: Put this in function
-            # Find objects in scene
-            img, kp = detect_keypoints(imgL)
-            # DEBUG
-            # cv2.imshow("keypoints", img)
-            clusters = extract_keypoints(kp)
-            cluster_mask = cluster_keypoints(clusters)
-            # DEBUG
-            # cv2.imshow("clustered", cluster_mask)
-            remove_clusters = plain - cluster_mask
-            remove_clusters = cv2.bitwise_and(remove_clusters, mask)
-            remove_clusters = cv2.bitwise_and(remove_clusters, inv_red)
-            remove_clusters = cv2.bitwise_and(remove_clusters, inv_green)
-            cv2.imshow("remove_clusters", remove_clusters)
-            ret, thresh1 = cv2.threshold(remove_clusters, 1, 255, cv2.THRESH_BINARY)
-            # DEBUG
-            # cv2.imshow("removed clusters", remove_clusters)
-            # cv2.imshow("threshed", thresh1)
+            img_dilation = remove_objects(plain, imgL)
 
-            # TODO: Put this in a function
-            img_erosion = cv2.erode(thresh1, kernel, iterations=5)
-            img_dilation = cv2.dilate(img_erosion, kernel, iterations=2)
-
-            _, contours, _ = cv2.findContours(img_dilation, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            # Draw the plane contour
+            _, contours, _ = cv2.findContours(img_dilation, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
             max_contour = max(contours, key=cv2.contourArea)
-            epsilon = 0.05 * cv2.arcLength(max_contour, True)
-            # approx = cv2.approxPolyDP(max_contour, epsilon, True)
-            cv2.drawContours(imgL, [max_contour], 0, (0,0,255), 2)
-            # cv2.drawContours(imgL, approx, 0, (0, 0, 255), 2)
+            epsilon = 0.002 * cv2.arcLength(max_contour, True)
+            approx = cv2.approxPolyDP(max_contour, epsilon, True)
+            # cv2.drawContours(imgL, [max_contour], 0, (0,0,255), 2)
+            cv2.drawContours(imgL, [approx], -1, (0, 0, 255), 2)
             cv2.imshow("contoured", imgL)
 
             cv2.waitKey(0)
