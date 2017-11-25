@@ -5,8 +5,6 @@
 #
 #########################################################
 
-# TODO: Output the file name and the road surface normal (a, b, c)
-# TODO: Find out how to calculate normal
 # TODO: Make sure that plane can be plotted; if it is vertical, throw away
 # TODO: To wrap-up, allow the script to cycle through the images without keypress
 # TODO: Draw glyph with normal
@@ -40,7 +38,7 @@ def remove_illumination(image):
     y, u, v = cv2.split(image)
     y = cv2.equalizeHist(y)
     # Remove low frequency details of the image
-    blur_y = cv2.GaussianBlur(y, (23,23), 0)
+    blur_y = cv2.GaussianBlur(y, (23, 23), 0)
     y = y - blur_y
     image = cv2.merge((y, u, v))
     return cv2.cvtColor(image, cv2.COLOR_YUV2BGR)
@@ -99,31 +97,31 @@ def cluster_keypoints(extracted_kp):
     temp, classified_points, centers = cv2.kmeans(extracted_kp, K=10, bestLabels=None,
                                                   criteria=crit, attempts=1,
                                                   flags=cv2.KMEANS_RANDOM_CENTERS)
-    for point, allocation in zip(extracted_kp, classified_points):
+    for pt, allocation in zip(extracted_kp, classified_points):
         color = (255, 255, 255)
-        cv2.circle(img, (int(point[0]), int(point[1])), 8, color, -1)
+        cv2.circle(img, (int(pt[0]), int(pt[1])), 8, color, -1)
 
-    _, contours, _ = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    _, conts, _ = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    for contour in contours:
+    for contour in conts:
         if cv2.arcLength(contour, False) > 90:
             x, y, w, h = cv2.boundingRect(contour)
             box = np.array([[[x, y], [x + w, y], [x + w, y + h], [x, y + h]]], dtype=np.int32)
             cv2.fillPoly(img, box, (255, 255, 255))
 
-    return img, contours
+    return img, conts
 
 
-def remove_objects(plain, imgL):
+def remove_objects(black_bg, left_img):
     # Find objects in scene
-    img, kp = detect_keypoints(imgL)
+    img, kp = detect_keypoints(left_img)
     # DEBUG
     # cv2.imshow("keypoints", img)
     clusters = extract_keypoints(kp)
     cluster_mask, contours_found = cluster_keypoints(clusters)
     # DEBUG
     # cv2.imshow("clustered", cluster_mask)
-    remove_clusters = plain - cluster_mask
+    remove_clusters = black_bg - cluster_mask
     remove_clusters = cv2.bitwise_and(remove_clusters, mask)
     remove_clusters = cv2.bitwise_and(remove_clusters, red_mask)
     remove_clusters = cv2.bitwise_and(remove_clusters, green_mask)
@@ -135,8 +133,8 @@ def remove_objects(plain, imgL):
     # cv2.imshow("threshed", thresh1)
 
     img_erosion = cv2.erode(thresh1, kernel, iterations=5)
-    img_dilation = cv2.dilate(img_erosion, kernel, iterations=2)
-    return img_dilation, contours_found
+    dilation = cv2.dilate(img_erosion, kernel, iterations=2)
+    return dilation, contours_found
 
 
 def collision_detected(cluster_box, top_left, top_right, top_y):
@@ -156,8 +154,8 @@ def collision_detected(cluster_box, top_left, top_right, top_y):
 
 # Remove red and green color regions
 # Creates clearer object boundaries
-def remove_colors(imgL):
-    hsv_l =cv2.cvtColor(imgL, cv2.COLOR_BGR2HSV)
+def remove_colors(left_image):
+    hsv_l = cv2.cvtColor(left_image, cv2.COLOR_BGR2HSV)
     sensitivity = 40
     lower_green = np.array([60 - sensitivity, 50, 50])
     upper_green = np.array([60 + sensitivity, 255, 255])
@@ -175,7 +173,7 @@ def remove_colors(imgL):
     ret, thresh_red = cv2.threshold(red_region, 1, 255, cv2.THRESH_BINARY)
     inv_red = cv2.bitwise_not(thresh_red)
     inv_red = cv2.dilate(inv_red, kernel, iterations=3)
-    ## DEBUG
+    # DEBUG
     # cv2.imshow("red regions", inv_red)
     return inv_green, inv_red
 
@@ -191,24 +189,24 @@ def remove_colors(imgL):
 # dimensions.                                           #
 #########################################################
 
-def preprocess(imgL, imgR):
-    illum_removed_l = remove_illumination(imgL)
-    illum_removed_r = remove_illumination(imgR)
+def preprocess(img_l, img_r):
+    illum_removed_l = remove_illumination(img_l)
+    illum_removed_r = remove_illumination(img_r)
     # N.B. need to do for both as both are 3-channel images
-    grayL = cv2.cvtColor(illum_removed_l, cv2.COLOR_BGR2GRAY)
-    grayR = cv2.cvtColor(illum_removed_r, cv2.COLOR_BGR2GRAY)
+    gray_l = cv2.cvtColor(illum_removed_l, cv2.COLOR_BGR2GRAY)
+    gray_r = cv2.cvtColor(illum_removed_r, cv2.COLOR_BGR2GRAY)
 
-    ret, thresh_R = cv2.threshold(grayR, 20, 100, cv2.THRESH_TOZERO)
-    ret, thresh_L = cv2.threshold(grayL, 20, 100, cv2.THRESH_TOZERO)
+    ret, thresh_r = cv2.threshold(gray_r, 20, 100, cv2.THRESH_TOZERO)
+    ret, thresh_l = cv2.threshold(gray_l, 20, 100, cv2.THRESH_TOZERO)
     # cv2.imshow("threshed_r", thresh_R)
     # cv2.imshow("threshed_l", thresh_L)
 
-    grayR_matched = match(thresh_R, thresh_L)
-    grayL_matched = match(thresh_L, thresh_R)
+    gray_r_matched = match(thresh_r, thresh_l)
+    gray_l_matched = match(thresh_l, thresh_r)
     # DEBUG
     # cv2.imshow("matched_r", grayR_matched)
 
-    return grayL_matched, grayR_matched
+    return gray_l_matched, gray_r_matched
 
 
 #########################################################
@@ -227,26 +225,26 @@ image_centre_w = 474.5
 #########################################################
 
 
-def project_disparity_to_3d(disparity, rgb=[]):
+def project_disparity_to_3d(disparity):
     points = []
     f = camera_focal_length_px
-    B = stereo_camera_baseline_m
+    b = stereo_camera_baseline_m
 
     height, width = disparity.shape[:2]
 
-    for y in range(height):  # 0 - height is the y axis index
-        for x in range(width):  # 0 - width is the x axis index
+    for h in range(height):  # 0 - height is the y axis index
+        for w in range(width):  # 0 - width is the x axis index
 
             # if we have a valid non-zero disparity
-            if disparity[y, x] > 0:
+            if disparity[h, w] > 0:
 
                 # calculate corresponding 3D point [X, Y, Z]
                 # stereo lecture - slide 22 + 25
-                Z = (f * B) / disparity[y, x]
-                X = ((x - image_centre_w) * Z) / f
-                Y = ((y - image_centre_h) * Z) / f
+                z = (f * b) / disparity[h, w]
+                x = ((w - image_centre_w) * z) / f
+                y = ((h - image_centre_h) * z) / f
 
-                points.append([X, Y, Z])
+                points.append([x, y, z])
 
     return points
 
@@ -260,8 +258,8 @@ def get_disparity(left_image, right_image):
     disparity = stereoProcessor.compute(left_image, right_image)
     # filter out noise and speckles (adjust parameters as needed)
 
-    dispNoiseFilter = 5  # increase for more aggressive filtering
-    cv2.filterSpeckles(disparity, 0, 4000, max_disparity - dispNoiseFilter)
+    disp_noise_filter = 5  # increase for more aggressive filtering
+    cv2.filterSpeckles(disparity, 0, 4000, max_disparity - disp_noise_filter)
 
     # scale the disparity to 8-bit for viewing
     # divide by 16 and convert to 8-bit image (then range of values should
@@ -320,8 +318,8 @@ def project_3d_points_to_2d_image_points(points):
 # Returns distances of all points from plane
 def ransac_plane(points, inlier_thresh, max_iterations=50):
     iterations = 0
-    best_abc, best_d = 0, 1
     inlier_points = []
+    best_plane_abc, best_plane_d = 0, 0
     while iterations < max_iterations:
         temp_inliers = []
         plane_abc, plane_d = fit_plane(points)
@@ -333,11 +331,12 @@ def ransac_plane(points, inlier_thresh, max_iterations=50):
         # Run many iterations and find plane with the most points that agree
         if len(temp_inliers) > len(inlier_points):
             inlier_points = temp_inliers
+            best_plane_abc, best_plane_d = plane_abc, plane_d
 
         iterations += 1
-    # TODO: Fix this
-    print("Normal: ", np.divide(best_abc, best_d))
-    return inlier_points
+
+    normal = np.divide(best_plane_abc, best_plane_d)
+    return inlier_points, normal
 
 
 #########################################################
@@ -352,34 +351,30 @@ def draw_polygon(points, cnt, image):
     max_x = 0
     min_y = float("inf")
     max_y = 0
-    for point in points:
-        if point[0][0] < min_x:
-            min_x = point[0][0]
-        elif point[0][0] > max_x:
-            max_x = point[0][0]
+    for pnt in points:
+        if pnt[0][0] < min_x:
+            min_x = pnt[0][0]
+        elif pnt[0][0] > max_x:
+            max_x = pnt[0][0]
 
-        if point[0][1] < min_y:
-            min_y = point[0][1]
-        elif point[0][1] > max_y:
-            max_y = point[0][1]
+        if pnt[0][1] < min_y:
+            min_y = pnt[0][1]
+        elif pnt[0][1] > max_y:
+            max_y = pnt[0][1]
 
     mid_x = (min_x + max_x) // 2
     trapezium_length = (max_y - min_y) * (16/9)
-    image = draw_trapezium(image, cnt, mid_x, min_y, max_y, trapezium_length)
+    image = draw_trapezium(image, cnt, mid_x, min_y, trapezium_length)
     return image
 
 
-def draw_trapezium(img, contours, midpoint_x, top_y, bottom_y, shape_length):
+def draw_trapezium(img, cnts, midpoint_x, top_y, shape_length):
     # Top x-axes
     tl = midpoint_x - (shape_length // 2.5)
     tr = midpoint_x + (shape_length // 2.5)
 
-    # Bottom x-axes
-    bl = midpoint_x - shape_length
-    br = midpoint_x + shape_length
-
     # Draw cluster bounding boxes first
-    for contour in contours:
+    for contour in cnts:
         if cv2.arcLength(contour, False) > 90:
             x, y, w, h = cv2.boundingRect(contour)
             box = {
@@ -449,7 +444,7 @@ if __name__ == '__main__':
             # DEBUG
             # cv2.imshow("masked_L", preprocessed_L)
             # cv2.imshow("masked_R", preprocessed_R)
-            print("-- files loaded successfully\n")
+            # print("-- files loaded successfully\n")
 
             disparity_scaled = get_disparity(preprocessed_L, preprocessed_R)
             # display image (scaling it to the full 0->255 range based on the number
@@ -461,14 +456,14 @@ if __name__ == '__main__':
 
             # Run RANSAC, keep only inliers
             threshold = 0.05
-            best_plane = ransac_plane(depth_points, threshold)
+            best_plane, normal_coeffs = ransac_plane(depth_points, threshold)
             points_to_draw = project_3d_points_to_2d_image_points(best_plane)
 
             # Numbers used to generate the mask offset
             dsp_x, dsp_y = dsp.shape[1], dsp.shape[0]
             img_x, img_y = imgL.shape[1], imgL.shape[0]
             for point in points_to_draw:
-                cv2.circle(plain, (int(point[0]) + (img_x - dsp_x), int(point[1])), 1, (255,255,255), 1)
+                cv2.circle(plain, (int(point[0]) + (img_x - dsp_x), int(point[1])), 1, (255, 255, 255), 1)
             # DEBUG
             # cv2.imshow("drawn circles", plain)
 
@@ -484,7 +479,15 @@ if __name__ == '__main__':
             # Find objects in plane in front of car
             imgL = draw_polygon(approx, img_contours, imgL)
 
-            cv2.imshow("contoured", imgL)
+            normal_coeffs = [str(x) for x in np.array(normal_coeffs).flatten()]
+            # Print as directed
+            print(filename_left)
+            print(filename_right + " : road surface normal (" +
+                  normal_coeffs[0] + ", " +
+                  normal_coeffs[1] + ", " +
+                  normal_coeffs[2] + ")"
+                  )
+            cv2.imshow("Output", imgL)
 
             cv2.waitKey(0)
         else:
