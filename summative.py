@@ -5,8 +5,7 @@
 #
 #########################################################
 
-# TODO: Make sure that plane can be plotted; if it is vertical, throw away
-# TODO: To wrap-up, allow the script to cycle through the images without keypress
+# TODO: When no road plane can be detected, output zero vector?
 # TODO: Draw glyph with normal
 # TODO: Write up report
 
@@ -183,11 +182,6 @@ def remove_colors(left_image):
 #########################################################
 #                  PRE-PROCESS IMAGES                   #
 #########################################################
-# NOTE: Apply a mask to the image, so not all points    #
-# are processed. Cropping is difficult because the      #
-# disparity calculations are based upon the image       #
-# dimensions.                                           #
-#########################################################
 
 def preprocess(img_l, img_r):
     illum_removed_l = remove_illumination(img_l)
@@ -319,24 +313,26 @@ def project_3d_points_to_2d_image_points(points):
 def ransac_plane(points, inlier_thresh, max_iterations=50):
     iterations = 0
     inlier_points = []
-    best_plane_abc, best_plane_d = 0, 0
+    best_normal = np.array([0, 0, 0])
     while iterations < max_iterations:
         temp_inliers = []
-        plane_abc, plane_d = fit_plane(points)
-        distances = get_distance_from_plane(points, plane_abc, plane_d)
-        for i in range(len(distances)):
-            if distances[i] < inlier_thresh:
-                temp_inliers.append(points[i])
+        try:
+            plane_abc, plane_d = fit_plane(points)
+            distances = get_distance_from_plane(points, plane_abc, plane_d)
+            for i in range(len(distances)):
+                if distances[i] < inlier_thresh:
+                    temp_inliers.append(points[i])
 
-        # Run many iterations and find plane with the most points that agree
-        if len(temp_inliers) > len(inlier_points):
-            inlier_points = temp_inliers
-            best_plane_abc, best_plane_d = plane_abc, plane_d
+            # Run many iterations and find plane with the most points that agree
+            if len(temp_inliers) > len(inlier_points):
+                inlier_points = temp_inliers
+                best_normal = np.divide(plane_abc, plane_d)
 
-        iterations += 1
+            iterations += 1
+        except Exception:
+            break
 
-    normal = np.divide(best_plane_abc, best_plane_d)
-    return inlier_points, normal
+    return inlier_points, best_normal
 
 
 #########################################################
@@ -397,6 +393,15 @@ def draw_trapezium(img, cnts, midpoint_x, top_y, shape_length):
     # img = cv2.polylines(img, [vertices], True, (0, 0, 255), 1)
 
     return img
+
+
+#########################################################
+#                 NORMAL CALCULATIONS                   #
+#########################################################
+
+def three_d_to_2_d_normal_vector(coeffs_abc, coeff_d):
+    x_axis = np.array([0, 1, 0])
+
 
 
 #########################################################
@@ -479,8 +484,8 @@ if __name__ == '__main__':
             # Find objects in plane in front of car
             imgL = draw_polygon(approx, img_contours, imgL)
 
+            # Print coefficients of plane normal
             normal_coeffs = [str(x) for x in np.array(normal_coeffs).flatten()]
-            # Print as directed
             print(filename_left)
             print(filename_right + " : road surface normal (" +
                   normal_coeffs[0] + ", " +
@@ -488,11 +493,9 @@ if __name__ == '__main__':
                   normal_coeffs[2] + ")"
                   )
             cv2.imshow("Output", imgL)
-
-            cv2.waitKey(0)
+            cv2.waitKey(5)  # wait 5 s before going to next frame
         else:
             print("-- files skipped (perhaps one is missing or not PNG)\n")
 
 # close all windows
-
 cv2.destroyAllWindows()
