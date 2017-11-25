@@ -5,7 +5,6 @@
 #
 #########################################################
 
-# TODO: Highlight anything that appears near the front
 # TODO: Output the file name and the road surface normal (a, b, c)
 # TODO: Find out how to calculate normal
 # TODO: Make sure that plane can be plotted; if it is vertical, throw away
@@ -112,7 +111,7 @@ def cluster_keypoints(extracted_kp):
             box = np.array([[[x, y], [x + w, y], [x + w, y + h], [x, y + h]]], dtype=np.int32)
             cv2.fillPoly(img, box, (255, 255, 255))
 
-    return img
+    return img, contours
 
 
 def remove_objects(plain, imgL):
@@ -121,7 +120,7 @@ def remove_objects(plain, imgL):
     # DEBUG
     # cv2.imshow("keypoints", img)
     clusters = extract_keypoints(kp)
-    cluster_mask = cluster_keypoints(clusters)
+    cluster_mask, contours_found = cluster_keypoints(clusters)
     # DEBUG
     # cv2.imshow("clustered", cluster_mask)
     remove_clusters = plain - cluster_mask
@@ -137,7 +136,18 @@ def remove_objects(plain, imgL):
 
     img_erosion = cv2.erode(thresh1, kernel, iterations=5)
     img_dilation = cv2.dilate(img_erosion, kernel, iterations=2)
-    return img_dilation
+    return img_dilation, contours_found
+
+
+def collision_detected(cluster_box, top_left, top_right, top_y):
+    if cluster_box['bottom_y'] < top_y:
+        return False
+
+    if cluster_box['right_x'] <= top_left or \
+            cluster_box['left_x'] >= top_right:
+        return False
+
+    return True
 
 
 #########################################################
@@ -169,6 +179,7 @@ def remove_colors(imgL):
     # cv2.imshow("red regions", inv_red)
     return inv_green, inv_red
 
+
 #####################################################################
 
 #########################################################
@@ -194,7 +205,8 @@ def preprocess(imgL, imgR):
 
     grayR_matched = match(thresh_R, thresh_L)
     grayL_matched = match(thresh_L, thresh_R)
-    cv2.imshow("matched_r", grayR_matched)
+    # DEBUG
+    # cv2.imshow("matched_r", grayR_matched)
 
     return grayL_matched, grayR_matched
 
@@ -329,6 +341,70 @@ def ransac_plane(points, inlier_thresh, max_iterations=50):
 
 
 #########################################################
+#              DRAWING HELPER FUNCTIONS                 #
+#########################################################
+
+# Get the centre of the shape that we want to plot
+# O(n)
+# Plot the shape
+def draw_polygon(points, cnt, image):
+    min_x = float("inf")
+    max_x = 0
+    min_y = float("inf")
+    max_y = 0
+    for point in points:
+        if point[0][0] < min_x:
+            min_x = point[0][0]
+        elif point[0][0] > max_x:
+            max_x = point[0][0]
+
+        if point[0][1] < min_y:
+            min_y = point[0][1]
+        elif point[0][1] > max_y:
+            max_y = point[0][1]
+
+    mid_x = (min_x + max_x) // 2
+    trapezium_length = (max_y - min_y) * (16/9)
+    image = draw_trapezium(image, cnt, mid_x, min_y, max_y, trapezium_length)
+    return image
+
+
+def draw_trapezium(img, contours, midpoint_x, top_y, bottom_y, shape_length):
+    # Top x-axes
+    tl = midpoint_x - (shape_length // 2.5)
+    tr = midpoint_x + (shape_length // 2.5)
+
+    # Bottom x-axes
+    bl = midpoint_x - shape_length
+    br = midpoint_x + shape_length
+
+    # Draw cluster bounding boxes first
+    for contour in contours:
+        if cv2.arcLength(contour, False) > 90:
+            x, y, w, h = cv2.boundingRect(contour)
+            box = {
+                'left_x': x,
+                'top_y': y,
+                'right_x': x + w,
+                'bottom_y': y + h
+            }
+
+            if collision_detected(box, tl, tr, top_y):
+                cv2.rectangle(imgL, (x, y), (x+w, y+h), (255, 0, 0), 2)
+            # DEBUG
+            # else:
+                # cv2.rectangle(imgL, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+    # DEBUG
+    # vertices = np.array([[tl, top_y], [tr, top_y],
+    #                      [br, bottom_y], [bl, bottom_y]], np.int32)
+    # vertices = vertices.reshape((-1, 1, 2))
+    # img = cv2.polylines(img, [vertices], True, (0, 0, 255), 1)
+
+    return img
+
+
+#########################################################
 #                     MAIN METHOD                       #
 #########################################################
 
@@ -396,15 +472,18 @@ if __name__ == '__main__':
             # DEBUG
             # cv2.imshow("drawn circles", plain)
 
-            img_dilation = remove_objects(plain, imgL)
+            img_dilation, img_contours = remove_objects(plain, imgL)
 
             # Draw the plane contour
             _, contours, _ = cv2.findContours(img_dilation, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
             max_contour = max(contours, key=cv2.contourArea)
             epsilon = 0.002 * cv2.arcLength(max_contour, True)
             approx = cv2.approxPolyDP(max_contour, epsilon, True)
-            # cv2.drawContours(imgL, [max_contour], 0, (0,0,255), 2)
             cv2.drawContours(imgL, [approx], -1, (0, 0, 255), 2)
+
+            # Find objects in plane in front of car
+            imgL = draw_polygon(approx, img_contours, imgL)
+
             cv2.imshow("contoured", imgL)
 
             cv2.waitKey(0)
