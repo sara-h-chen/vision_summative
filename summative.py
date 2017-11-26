@@ -141,8 +141,12 @@ def remove_objects(black_bg, left_img):
     return dilation, contours_found
 
 
-def collision_detected(cluster_box, top_left, top_right, top_y):
+def collision_detected(cluster_box, top_left, top_right, top_y, bottom_y):
     if cluster_box['bottom_y'] < top_y + 5:
+        return False
+
+    cut_off_point = top_y + ((bottom_y - top_y) // 2)
+    if cluster_box['top_y'] > cut_off_point:
         return False
 
     if cluster_box['right_x'] <= top_left or \
