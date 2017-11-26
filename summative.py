@@ -5,7 +5,6 @@
 #
 #########################################################
 
-# TODO: When no road plane can be detected, output zero vector?
 # TODO: Draw glyph with normal
 # TODO: Write up report
 
@@ -137,7 +136,7 @@ def remove_objects(black_bg, left_img):
 
 
 def collision_detected(cluster_box, top_left, top_right, top_y):
-    if cluster_box['bottom_y'] < top_y:
+    if cluster_box['bottom_y'] < top_y + 5:
         return False
 
     if cluster_box['right_x'] <= top_left or \
@@ -314,6 +313,8 @@ def ransac_plane(points, inlier_thresh, max_iterations=50):
     iterations = 0
     inlier_points = []
     best_normal = np.array([0, 0, 0])
+    smallest_distance = float("inf")
+    closest_to_plane = None
     while iterations < max_iterations:
         temp_inliers = []
         try:
@@ -322,6 +323,10 @@ def ransac_plane(points, inlier_thresh, max_iterations=50):
             for i in range(len(distances)):
                 if distances[i] < inlier_thresh:
                     temp_inliers.append(points[i])
+
+                    if distances[i] < smallest_distance:
+                        smallest_distance = distances[i]
+                        closest_to_plane = points[i]
 
             # Run many iterations and find plane with the most points that agree
             if len(temp_inliers) > len(inlier_points):
@@ -332,7 +337,7 @@ def ransac_plane(points, inlier_thresh, max_iterations=50):
         except Exception:
             break
 
-    return inlier_points, best_normal
+    return inlier_points, best_normal, closest_to_plane
 
 
 #########################################################
@@ -398,10 +403,56 @@ def draw_trapezium(img, cnts, midpoint_x, top_y, shape_length):
 #########################################################
 #                 NORMAL CALCULATIONS                   #
 #########################################################
+# Source: http://mlikihazar.blogspot.com.au/2013/       #
+# 02/draw-arrow-opencv.html                             #
+#########################################################
 
-def three_d_to_2_d_normal_vector(coeffs_abc, coeff_d):
-    x_axis = np.array([0, 1, 0])
 
+def draw_normal_vector(constant, image, plane_point, normal):
+    to_subtract = np.multiply(np.absolute(normal), constant)
+    end_of_point = plane_point - to_subtract.flatten()
+    results = project_3d_points_to_2d_image_points([plane_point, end_of_point])
+    # Get coordinate values; standardize location
+    p_x, p_y = 150, 100
+    q_x, q_y = results[1][0] - (results[0][0] - 150), results[1][1] - (results[0][1] - 100)
+    normalized_x, normalized_y = make_unit((p_x, p_y), (q_x, q_y))
+
+    # Draw a box
+    cv2.rectangle(image, (100, 50), (200, 100), (254, 117, 31), 3)
+    cv2.putText(image, 'NORMAL', (103, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (254, 117, 31), 2, cv2.LINE_AA)
+
+    # Draw arrow in box
+    draw_arrow(image, (int(p_x), int(p_y)), (int(normalized_x), int(normalized_y)), (254, 117, 31))
+    return image
+
+
+def make_unit(start_point, end_point):
+    translated_to_origin = (end_point[0] - start_point[0], end_point[1] - start_point[1])
+    # print(translated_to_origin)
+    magnitude = math.sqrt(translated_to_origin[0] ** 2 + translated_to_origin[1] ** 2)
+    # print(magnitude)
+    scaled_translated_to_origin = (translated_to_origin[0] / magnitude * 35, translated_to_origin[1] / magnitude * 35)
+    # print(scaled_translated_to_origin)
+    scaled_original = (scaled_translated_to_origin[0] + start_point[0], scaled_translated_to_origin[1] + start_point[1])
+    return scaled_original
+
+
+def draw_arrow(image, p, q, color, arrow_magnitude=9, thickness=2, line_type=8, shift=0):
+    # draw arrow tail
+    cv2.line(image, p, q, color, thickness, line_type, shift)
+    # calc angle of the arrow
+    angle = np.arctan2(p[1]-q[1], p[0]-q[0])
+    # starting point of first line of arrow head
+    p = (int(q[0] + arrow_magnitude * np.cos(angle + np.pi/4)),
+         int(q[1] + arrow_magnitude * np.sin(angle + np.pi/4)))
+    # draw first half of arrow head
+    cv2.line(image, p, q, color, thickness, line_type, shift)
+    # starting point of second line of arrow head
+    p = (int(q[0] + arrow_magnitude * np.cos(angle - np.pi/4)),
+         int(q[1] + arrow_magnitude * np.sin(angle - np.pi/4)))
+    # draw second half of arrow head
+    cv2.line(image, p, q, color, thickness, line_type, shift)
+    return image
 
 
 #########################################################
@@ -461,7 +512,7 @@ if __name__ == '__main__':
 
             # Run RANSAC, keep only inliers
             threshold = 0.05
-            best_plane, normal_coeffs = ransac_plane(depth_points, threshold)
+            best_plane, normal_coeffs, closest_pt_to_plane = ransac_plane(depth_points, threshold)
             points_to_draw = project_3d_points_to_2d_image_points(best_plane)
 
             # Numbers used to generate the mask offset
@@ -483,6 +534,9 @@ if __name__ == '__main__':
 
             # Find objects in plane in front of car
             imgL = draw_polygon(approx, img_contours, imgL)
+
+            # Draw normal arrow
+            draw_normal_vector(0.2, imgL, closest_pt_to_plane, normal_coeffs)
 
             # Print coefficients of plane normal
             normal_coeffs = [str(x) for x in np.array(normal_coeffs).flatten()]
