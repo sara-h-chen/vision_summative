@@ -116,7 +116,32 @@ def cluster_keypoints(extracted_kp):
     return img, conts
 
 
-def remove_objects(black_bg, left_img):
+# def remove_objects(black_bg, left_img):
+#     # Find objects in scene
+#     img, kp = detect_keypoints(left_img)
+#     # DEBUG
+#     # cv2.imshow("keypoints", img)
+#     clusters = extract_keypoints(kp)
+#     cluster_mask, contours_found = cluster_keypoints(clusters)
+#     # DEBUG
+#     # cv2.imshow("clustered", cluster_mask)
+#     remove_clusters = black_bg - cluster_mask
+#     remove_clusters = cv2.bitwise_and(remove_clusters, mask)
+#     remove_clusters = cv2.bitwise_and(remove_clusters, red_mask)
+#     remove_clusters = cv2.bitwise_and(remove_clusters, green_mask)
+#     # DEBUG
+#     # cv2.imshow("remove_clusters", remove_clusters)
+#     ret, thresh1 = cv2.threshold(remove_clusters, 1, 255, cv2.THRESH_BINARY)
+#     # DEBUG
+#     # cv2.imshow("removed clusters", remove_clusters)
+#     # cv2.imshow("threshed", thresh1)
+#
+#     img_erosion = cv2.erode(thresh1, kernel, iterations=5)
+#     dilation = cv2.dilate(img_erosion, kernel, iterations=2)
+#     return dilation, contours_found
+
+
+def remove_objects(black_bg, edges, left_img):
     # Find objects in scene
     img, kp = detect_keypoints(left_img)
     # DEBUG
@@ -124,11 +149,12 @@ def remove_objects(black_bg, left_img):
     clusters = extract_keypoints(kp)
     cluster_mask, contours_found = cluster_keypoints(clusters)
     # DEBUG
-    cv2.imshow("clustered", cluster_mask)
+    # cv2.imshow("clustered", cluster_mask)
     remove_clusters = black_bg - cluster_mask
     remove_clusters = cv2.bitwise_and(remove_clusters, mask)
     remove_clusters = cv2.bitwise_and(remove_clusters, red_mask)
     remove_clusters = cv2.bitwise_and(remove_clusters, green_mask)
+    remove_clusters = cv2.bitwise_and(remove_clusters, edges)
     # DEBUG
     # cv2.imshow("remove_clusters", remove_clusters)
     ret, thresh1 = cv2.threshold(remove_clusters, 1, 255, cv2.THRESH_BINARY)
@@ -422,6 +448,22 @@ def draw_trapezium(img, cnts, midpoint_x, top_y, bottom_y, shape_length):
     return img
 
 
+def canny(gray_image):
+    canny_mask = cv2.imread('image_assets/canny_mask.png', 0)
+    gray_image = cv2.blur(gray_image, (5,5))
+    cv2.imshow("blurred", gray_image)
+    edges = cv2.Canny(gray_image, 100, 200)
+    _, contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    for contour in contours:
+        if cv2.arcLength(contour, False) > 200:
+            edges = cv2.drawContours(edges, contours, -1, (255, 255, 255), 2)
+    edges = cv2.bitwise_and(edges, canny_mask)
+    edges = cv2.bitwise_not(edges)
+    # DEBUG
+    cv2.imshow('edges', edges)
+    return edges
+
+
 #########################################################
 #                 NORMAL CALCULATIONS                   #
 #########################################################
@@ -543,7 +585,9 @@ if __name__ == '__main__':
             # cv2.imshow("drawn circles", plain)
 
             # Remove noise
-            img_dilation, img_contours = remove_objects(plain, imgL)
+            detect_edges = canny(cv2.cvtColor(imgL, cv2.COLOR_BGR2GRAY))
+            # img_dilation, img_contours = remove_objects(plain, imgL)
+            img_dilation, img_contours = remove_objects(plain, detect_edges, imgL)
 
             # Draw the plane contour
             _, contours, _ = cv2.findContours(img_dilation, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
