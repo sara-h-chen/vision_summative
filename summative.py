@@ -124,7 +124,7 @@ def remove_objects(black_bg, left_img):
     clusters = extract_keypoints(kp)
     cluster_mask, contours_found = cluster_keypoints(clusters)
     # DEBUG
-    # cv2.imshow("clustered", cluster_mask)
+    cv2.imshow("clustered", cluster_mask)
     remove_clusters = black_bg - cluster_mask
     remove_clusters = cv2.bitwise_and(remove_clusters, mask)
     remove_clusters = cv2.bitwise_and(remove_clusters, red_mask)
@@ -190,8 +190,12 @@ def remove_colors(left_image):
 #########################################################
 
 def preprocess(img_l, img_r):
+    # DEBUG
+    # cv2.imshow("img_l", img_l)
     illum_removed_l = remove_illumination(img_l)
     illum_removed_r = remove_illumination(img_r)
+    # DEBUG
+    # cv2.imshow("illum_removed_l", illum_removed_l)
     # N.B. need to do for both as both are 3-channel images
     gray_l = cv2.cvtColor(illum_removed_l, cv2.COLOR_BGR2GRAY)
     gray_r = cv2.cvtColor(illum_removed_r, cv2.COLOR_BGR2GRAY)
@@ -205,7 +209,7 @@ def preprocess(img_l, img_r):
     gray_r_matched = match(thresh_r, thresh_l)
     gray_l_matched = match(thresh_l, thresh_r)
     # DEBUG
-    # cv2.imshow("matched_r", grayR_matched)
+    # cv2.imshow("matched_r", gray_r_matched)
 
     return gray_l_matched, gray_r_matched
 
@@ -402,8 +406,7 @@ def draw_trapezium(img, cnts, midpoint_x, top_y, shape_length):
                 # cv2.rectangle(imgL, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
     # DEBUG
-    # vertices = np.array([[tl, top_y], [tr, top_y],
-    #                      [br, bottom_y], [bl, bottom_y]], np.int32)
+    # vertices = np.array([[tl, top_y], [tr, top_y]], np.int32)
     # vertices = vertices.reshape((-1, 1, 2))
     # img = cv2.polylines(img, [vertices], True, (0, 0, 255), 1)
 
