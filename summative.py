@@ -566,6 +566,12 @@ if __name__ == '__main__':
                   normal_coeffs[1] + ", " +
                   normal_coeffs[2] + ")"
                   )
+            with open("logs.txt", "a") as f:
+                f.write("(" +
+                        normal_coeffs[0] + ", " +
+                        normal_coeffs[1] + ", " +
+                        normal_coeffs[2] + ")"
+                        )
             cv2.imshow("Output", imgL)
             cv2.waitKey(5)  # wait 5 s before going to next frame
         else:
