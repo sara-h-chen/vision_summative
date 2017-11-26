@@ -382,12 +382,12 @@ def draw_polygon(points, cnt, image):
 
     mid_x = (min_x + max_x) // 2
     trapezium_length = (max_y - min_y) * (16/9)
-    image = draw_trapezium(image, cnt, mid_x, min_y, trapezium_length)
+    image = draw_trapezium(image, cnt, mid_x, min_y, max_y, trapezium_length)
     return image
 
 
 # Creates invisible trapezoid ROI
-def draw_trapezium(img, cnts, midpoint_x, top_y, shape_length):
+def draw_trapezium(img, cnts, midpoint_x, top_y, bottom_y, shape_length):
     # Top x-axes
     tl = midpoint_x - (shape_length // 2.5)
     tr = midpoint_x + (shape_length // 2.5)
@@ -408,7 +408,7 @@ def draw_trapezium(img, cnts, midpoint_x, top_y, shape_length):
                 'bottom_y': y + h
             }
 
-            if collision_detected(box, tl, tr, top_y):
+            if collision_detected(box, tl, tr, top_y, bottom_y):
                 cv2.rectangle(imgL, (x, y), (x+w, y+h), (255, 0, 0), 2)
             # DEBUG
             # else:
