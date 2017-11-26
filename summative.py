@@ -1,12 +1,17 @@
 #########################################################
 #               COMPUTER VISION SUMMATIVE               #
 #########################################################
-#
-#
+# Before running the code, specify the path to your     #
+# dataset in the variable below. Then run the program   #
+# by calling the main method, i.e.                      #
+#     python3 summative.py                              #
+#########################################################
+# NOTE: The code will automatically cycle through the   #
+# images in the dataset, but does not support any key-  #
+# press functionality. It takes a while to process so   #
+# do not be alarmed if it appears to have stopped.      #
 #########################################################
 
-# TODO: Draw glyph with normal
-# TODO: Write up report
 
 import os
 import cv2
@@ -27,8 +32,9 @@ orb = cv2.ORB_create()
 #########################################################
 #             ILLUMINATION PRE-PROCESSING               #
 #########################################################
-# https://stackoverflow.com/questions/18452438/how-can- #
-# i-remove-drastic-brightness-variations-in-a-video     #
+# Reference: https://stackoverflow.com/questions/       #
+# 18452438/how-can-i-remove-drastic-brightness-         #
+# variations-in-a-video                                 #
 #########################################################
 
 def remove_illumination(image):
@@ -45,7 +51,7 @@ def remove_illumination(image):
 #########################################################
 #                 HISTOGRAM MATCHING                    #
 #########################################################
-# http://vzaguskin.github.io/histmatching1/             #
+# Reference: http://vzaguskin.github.io/histmatching1/  #
 #########################################################
 
 def match(imsrc, imdest, nbr_bins=255):
@@ -151,8 +157,9 @@ def collision_detected(cluster_box, top_left, top_right, top_y):
 #########################################################
 
 # Remove red and green color regions
-# Creates clearer object boundaries
+# Assumes the car will not be driven on grass
 def remove_colors(left_image):
+    # Remove any green regions
     hsv_l = cv2.cvtColor(left_image, cv2.COLOR_BGR2HSV)
     sensitivity = 40
     lower_green = np.array([60 - sensitivity, 50, 50])
@@ -191,6 +198,7 @@ def preprocess(img_l, img_r):
 
     ret, thresh_r = cv2.threshold(gray_r, 20, 100, cv2.THRESH_TOZERO)
     ret, thresh_l = cv2.threshold(gray_l, 20, 100, cv2.THRESH_TOZERO)
+    # DEBUG
     # cv2.imshow("threshed_r", thresh_R)
     # cv2.imshow("threshed_l", thresh_L)
 
@@ -317,6 +325,7 @@ def ransac_plane(points, inlier_thresh, max_iterations=50):
     closest_to_plane = None
     while iterations < max_iterations:
         temp_inliers = []
+        # Put in try block, in case plane cannot be found
         try:
             plane_abc, plane_d = fit_plane(points)
             distances = get_distance_from_plane(points, plane_abc, plane_d)
@@ -341,12 +350,12 @@ def ransac_plane(points, inlier_thresh, max_iterations=50):
 
 
 #########################################################
-#              DRAWING HELPER FUNCTIONS                 #
+#         OBJECT DETECTION HELPER FUNCTIONS             #
 #########################################################
 
-# Get the centre of the shape that we want to plot
+# Get the centre of the trapezoid that we want to use
 # O(n)
-# Plot the shape
+# Checks for objects that enters the trapezoidal region
 def draw_polygon(points, cnt, image):
     min_x = float("inf")
     max_x = 0
@@ -369,6 +378,7 @@ def draw_polygon(points, cnt, image):
     return image
 
 
+# Creates invisible trapezoid ROI
 def draw_trapezium(img, cnts, midpoint_x, top_y, shape_length):
     # Top x-axes
     tl = midpoint_x - (shape_length // 2.5)
@@ -403,10 +413,9 @@ def draw_trapezium(img, cnts, midpoint_x, top_y, shape_length):
 #########################################################
 #                 NORMAL CALCULATIONS                   #
 #########################################################
-# Source: http://mlikihazar.blogspot.com.au/2013/       #
+# Reference: http://mlikihazar.blogspot.com.au/2013/    #
 # 02/draw-arrow-opencv.html                             #
 #########################################################
-
 
 def draw_normal_vector(constant, image, plane_point, normal):
     to_subtract = np.multiply(np.absolute(normal), constant)
@@ -417,7 +426,7 @@ def draw_normal_vector(constant, image, plane_point, normal):
     q_x, q_y = results[1][0] - (results[0][0] - 150), results[1][1] - (results[0][1] - 100)
     normalized_x, normalized_y = make_unit((p_x, p_y), (q_x, q_y))
 
-    # Draw a box
+    # Draw glyph box
     cv2.rectangle(image, (100, 50), (200, 100), (254, 117, 31), 3)
     cv2.putText(image, 'NORMAL', (103, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (254, 117, 31), 2, cv2.LINE_AA)
 
@@ -426,13 +435,11 @@ def draw_normal_vector(constant, image, plane_point, normal):
     return image
 
 
+# Normalize the normal vector
 def make_unit(start_point, end_point):
     translated_to_origin = (end_point[0] - start_point[0], end_point[1] - start_point[1])
-    # print(translated_to_origin)
     magnitude = math.sqrt(translated_to_origin[0] ** 2 + translated_to_origin[1] ** 2)
-    # print(magnitude)
     scaled_translated_to_origin = (translated_to_origin[0] / magnitude * 35, translated_to_origin[1] / magnitude * 35)
-    # print(scaled_translated_to_origin)
     scaled_original = (scaled_translated_to_origin[0] + start_point[0], scaled_translated_to_origin[1] + start_point[1])
     return scaled_original
 
@@ -515,7 +522,7 @@ if __name__ == '__main__':
             best_plane, normal_coeffs, closest_pt_to_plane = ransac_plane(depth_points, threshold)
             points_to_draw = project_3d_points_to_2d_image_points(best_plane)
 
-            # Numbers used to generate the mask offset
+            # Numbers used to generate offset values
             dsp_x, dsp_y = dsp.shape[1], dsp.shape[0]
             img_x, img_y = imgL.shape[1], imgL.shape[0]
             for point in points_to_draw:
@@ -523,6 +530,7 @@ if __name__ == '__main__':
             # DEBUG
             # cv2.imshow("drawn circles", plain)
 
+            # Remove noise
             img_dilation, img_contours = remove_objects(plain, imgL)
 
             # Draw the plane contour
@@ -535,7 +543,7 @@ if __name__ == '__main__':
             # Find objects in plane in front of car
             imgL = draw_polygon(approx, img_contours, imgL)
 
-            # Draw normal arrow
+            # Draw glyph for normal
             draw_normal_vector(0.2, imgL, closest_pt_to_plane, normal_coeffs)
 
             # Print coefficients of plane normal

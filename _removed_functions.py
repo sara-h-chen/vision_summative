@@ -5,17 +5,17 @@
 # def find_inliers(points, distances, thrsh):
 #     inliers = np.select([distances <= thrsh, distances > thrsh], [1.0, 0.0])
 #     return np.multiply(points, inliers)
-
-
-#########################################################
-#              DRAWING HELPER FUNCTIONS                 #
-#########################################################
-# IGNORE THIS: Failed function                          #
-#########################################################
 #
-## Get the centre of the shape that we want to plot
-## O(n)
-## Plot the shape
+#
+# ########################################################
+# #             DRAWING HELPER FUNCTIONS                 #
+# ########################################################
+# #  IGNORE THIS FILE: Unused/refactored functions       #
+# ########################################################
+#
+# # Get the centre of the shape that we want to plot
+# # O(n)
+# # Plot the shape
 # def draw_polygon(points, cnt, image):
 #     min_x = float("inf")
 #     max_x = 0
@@ -130,3 +130,16 @@
 # # Find x-intersection of box on right
 # def trapezium_linear_x_right(y_intersection):
 #     return int((y_intersection + 133.25) * 8/5)
+#
+#
+# def make_length(start_point, end_point, length):
+# 	translated_to_origin = (end_point[0] - start_point[0], end_point[1] - start_point[1])
+# 	print(translated_to_origin)
+# 	magnitude = math.sqrt(translated_to_origin[0]**2 + translated_to_origin[1]**2)
+# 	print(magnitude)
+# 	scaled_translated_to_origin = (translated_to_origin[0] * 1. / magnitude * length,
+#                                  translated_to_origin[1] * 1. / magnitude * length)
+# 	print(scaled_translated_to_origin)
+# 	scaled_original = (scaled_translated_to_origin[0] + start_point[0],
+#                      scaled_translated_to_origin[1] + start_point[1])
+# 	return scaled_original
