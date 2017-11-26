@@ -388,6 +388,11 @@ def draw_trapezium(img, cnts, midpoint_x, top_y, shape_length):
     tl = midpoint_x - (shape_length // 2.5)
     tr = midpoint_x + (shape_length // 2.5)
 
+    # DEBUG
+    # Bottom x-axes
+    # bl = midpoint_x - shape_length
+    # br = midpoint_x + shape_length
+
     # Draw cluster bounding boxes first
     for contour in cnts:
         if cv2.arcLength(contour, False) > 90:
@@ -406,7 +411,7 @@ def draw_trapezium(img, cnts, midpoint_x, top_y, shape_length):
                 # cv2.rectangle(imgL, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
     # DEBUG
-    # vertices = np.array([[tl, top_y], [tr, top_y]], np.int32)
+    # vertices = np.array([[tl, top_y], [tr, top_y], [br, bottom_y], [bl, bottom_y]], np.int32)
     # vertices = vertices.reshape((-1, 1, 2))
     # img = cv2.polylines(img, [vertices], True, (0, 0, 255), 1)
 
