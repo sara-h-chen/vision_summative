@@ -241,7 +241,7 @@ def preprocess(img_l, img_r):
     # DEBUG
     # cv2.imshow("matched_r", gray_r_matched)
 
-    return gray_l_matched, gray_r_matched
+    return illum_removed_l, gray_l_matched, gray_r_matched
 
 
 #########################################################
@@ -420,8 +420,8 @@ def draw_trapezium(img, cnts, midpoint_x, top_y, bottom_y, shape_length):
 
     # DEBUG
     # Bottom x-axes
-    # bl = midpoint_x - shape_length
-    # br = midpoint_x + shape_length
+    bl = midpoint_x - shape_length
+    br = midpoint_x + shape_length
 
     # Draw cluster bounding boxes first
     for contour in cnts:
@@ -435,23 +435,24 @@ def draw_trapezium(img, cnts, midpoint_x, top_y, bottom_y, shape_length):
             }
 
             if collision_detected(box, tl, tr, top_y, bottom_y):
-                cv2.rectangle(imgL, (x, y), (x+w, y+h), (255, 0, 0), 2)
+                cv2.rectangle(img, (x, y), (x+w, y+h), (255, 0, 0), 2)
             # DEBUG
             # else:
                 # cv2.rectangle(imgL, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
     # DEBUG
-    # vertices = np.array([[tl, top_y], [tr, top_y], [br, bottom_y], [bl, bottom_y]], np.int32)
-    # vertices = vertices.reshape((-1, 1, 2))
-    # img = cv2.polylines(img, [vertices], True, (0, 0, 255), 1)
+    vertices = np.array([[tl, top_y], [tr, top_y], [br, bottom_y], [bl, bottom_y]], np.int32)
+    vertices = vertices.reshape((-1, 1, 2))
+    img_trapezoid = cv2.polylines(np.copy(img), [vertices], True, (0, 0, 255), 1)
 
-    return img
+    return img, img_trapezoid
 
 
 def canny(gray_image):
     canny_mask = cv2.imread('image_assets/canny_mask.png', 0)
     gray_image = cv2.blur(gray_image, (5,5))
-    cv2.imshow("blurred", gray_image)
+    # DEBUG
+    # cv2.imshow("blurred", gray_image)
     edges = cv2.Canny(gray_image, 100, 200)
     _, contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
     for contour in contours:
@@ -460,8 +461,31 @@ def canny(gray_image):
     edges = cv2.bitwise_and(edges, canny_mask)
     edges = cv2.bitwise_not(edges)
     # DEBUG
-    cv2.imshow('edges', edges)
+    # cv2.imshow('edges', edges)
     return edges
+
+
+#########################################################
+#                 DISPLAY FUNCTIONS                     #
+#########################################################
+# Reference: http://answers.opencv.org/question/175912/ #
+# how-to-display-multiple-images-in-one-window/         #
+#########################################################
+
+def stack_images(illum_removed, depth_map, plotted_plane, canny, clusters_removed, trapezoid, final_output):
+    smaller_illum = cv2.resize(illum_removed, (0, 0), None, .5, .5)
+    smaller_dsp = cv2.resize(cv2.cvtColor(depth_map, cv2.COLOR_GRAY2BGR), (0, 0), None, .5, .5)
+
+    smaller_trapezoid = cv2.resize(trapezoid, (0, 0), None, .25, .25)
+    smaller_plane = cv2.resize(cv2.cvtColor(plotted_plane, cv2.COLOR_GRAY2BGR), (0, 0), None, .25, .25)
+    smaller_canny = cv2.resize(cv2.cvtColor(canny, cv2.COLOR_GRAY2BGR), (0, 0), None, .25, .25)
+    smaller_clusters = cv2.resize(cv2.cvtColor(clusters_removed, cv2.COLOR_GRAY2BGR), (0, 0), None, .25, .25)
+
+    col_1 = np.concatenate((smaller_illum, smaller_dsp), axis=0)
+    col_2 = np.concatenate((smaller_plane, smaller_trapezoid, smaller_canny, smaller_clusters), axis=0)
+    numpy_horizontal = np.concatenate((col_1, col_2, final_output), axis=1)
+
+    return numpy_horizontal
 
 
 #########################################################
@@ -549,7 +573,7 @@ if __name__ == '__main__':
             red_mask, green_mask = remove_colors(imgL)
 
             # Histogram equalization
-            preprocessed_L, preprocessed_R = preprocess(imgL, imgR)
+            no_illum_l, preprocessed_L, preprocessed_R = preprocess(imgL, imgR)
             # DEBUG
             # cv2.imshow("preprocessed_L", preprocessed_L)
             # cv2.imshow("preprocessed_R", preprocessed_R)
@@ -586,8 +610,9 @@ if __name__ == '__main__':
 
             # Remove noise
             detect_edges = canny(cv2.cvtColor(imgL, cv2.COLOR_BGR2GRAY))
-            # img_dilation, img_contours = remove_objects(plain, imgL)
             img_dilation, img_contours = remove_objects(plain, detect_edges, imgL)
+            # DEBUG
+            # img_dilation, img_contours = remove_objects(plain, imgL)
 
             # Draw the plane contour
             _, contours, _ = cv2.findContours(img_dilation, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
@@ -597,7 +622,7 @@ if __name__ == '__main__':
             cv2.drawContours(imgL, [approx], -1, (0, 0, 255), 2)
 
             # Find objects in plane in front of car
-            imgL = draw_polygon(approx, img_contours, imgL)
+            imgL, trapezoid = draw_polygon(approx, img_contours, imgL)
 
             # Draw glyph for normal
             draw_normal_vector(0.2, imgL, closest_pt_to_plane, normal_coeffs)
@@ -616,7 +641,9 @@ if __name__ == '__main__':
                         normal_coeffs[1] + ", " +
                         normal_coeffs[2] + ")"
                         )
-            cv2.imshow("Output", imgL)
+            # DEBUG
+            # cv2.imshow("Output", imgL)
+            cv2.imshow("", stack_images(no_illum_l, dsp, plain, detect_edges, img_dilation, trapezoid, imgL))
             cv2.waitKey(5)  # wait 5 s before going to next frame
         else:
             print("-- files skipped (perhaps one is missing or not PNG)\n")
