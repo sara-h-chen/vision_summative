@@ -12,7 +12,6 @@
 # do not be alarmed if it appears to have stopped.      #
 #########################################################
 
-
 import os
 import cv2
 import math
@@ -443,7 +442,7 @@ def draw_trapezium(img, cnts, midpoint_x, top_y, bottom_y, shape_length):
     # DEBUG
     vertices = np.array([[tl, top_y], [tr, top_y], [br, bottom_y], [bl, bottom_y]], np.int32)
     vertices = vertices.reshape((-1, 1, 2))
-    img_trapezoid = cv2.polylines(np.copy(img), [vertices], True, (0, 0, 255), 1)
+    img_trapezoid = cv2.polylines(np.copy(img), [vertices], True, (0, 255, 0), 2)
 
     return img, img_trapezoid
 
@@ -559,6 +558,11 @@ if __name__ == '__main__':
     stereoProcessor = cv2.StereoSGBM_create(0, max_disparity, 21)
     kernel = np.ones((5, 5), np.uint8)
 
+    # DEBUG
+    # To create video
+    fourcc = cv2.VideoWriter_fourcc(*'XVID')
+    out = cv2.VideoWriter('final.avi', fourcc, 5.0, (1792, 544))
+
     for filename_left in left_file_list:
         # from the left image filename get the corresponding right image
         filename_right = filename_left.replace("_L", "_R")
@@ -635,18 +639,23 @@ if __name__ == '__main__':
                   normal_coeffs[1] + ", " +
                   normal_coeffs[2] + ")"
                   )
+
             with open("logs.txt", "a") as f:
                 f.write("(" +
                         normal_coeffs[0] + ", " +
                         normal_coeffs[1] + ", " +
                         normal_coeffs[2] + ")"
                         )
+
             # DEBUG
             # cv2.imshow("Output", imgL)
-            cv2.imshow("", stack_images(no_illum_l, dsp, plain, detect_edges, img_dilation, trapezoid, imgL))
+            final = stack_images(no_illum_l, dsp, plain, detect_edges, img_dilation, trapezoid, imgL)
+            cv2.imshow("", final)
+            out.write(final)
             cv2.waitKey(5)  # wait 5 s before going to next frame
         else:
             print("-- files skipped (perhaps one is missing or not PNG)\n")
 
-# close all windows
-cv2.destroyAllWindows()
+    # close all windows
+    out.release()
+    cv2.destroyAllWindows()
